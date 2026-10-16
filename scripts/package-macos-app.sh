@@ -41,7 +41,7 @@ done
 
 /usr/bin/lipo -create "$arm_binary" "$intel_binary" -output "$app/Contents/MacOS/EdgeMotion"
 chmod 755 "$app/Contents/MacOS/EdgeMotion"
-/usr/bin/lipo -verify_arch arm64 x86_64 "$app/Contents/MacOS/EdgeMotion"
+/usr/bin/lipo "$app/Contents/MacOS/EdgeMotion" -verify_arch arm64 x86_64
 
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
