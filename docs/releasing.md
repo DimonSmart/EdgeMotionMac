@@ -1,40 +1,42 @@
 # EdgeMotion release setup
 
-## One-time configuration
+EdgeMotion is published as an **unsigned and unnotarized** macOS app via GitHub Releases, as CSharpFar is. No Apple Developer account, certificate, App Store Connect API key, or signing-related GitHub secrets are required.
 
-A paid Apple Developer account, a **Developer ID Application** certificate exported as a password-protected PKCS#12 (.p12), and an App Store Connect API key authorized for notarization are required. In **Settings → Secrets and variables → Actions**, configure:
+## Repository configuration
 
-| Secret | Value |
-| --- | --- |
-| `APPLE_DEVELOPER_ID_P12_BASE64` | Base64-encoded contents of the Developer ID Application .p12 |
-| `APPLE_DEVELOPER_ID_P12_PASSWORD` | Password for that .p12 |
-| `APPLE_DEVELOPER_ID_IDENTITY` | Exact identity shown by `security find-identity -v -p codesigning`, e.g. Developer ID Application: ... |
-| `APPLE_API_KEY_ID` | App Store Connect API key ID |
-| `APPLE_API_ISSUER_ID` | App Store Connect issuer ID |
-| `APPLE_API_KEY_P8_BASE64` | Base64-encoded contents of the AuthKey_*.p8 private key |
+- Enable GitHub Actions.
+- The release workflow uses the built-in GitHub token with `contents: write` to publish a Release and update `Casks/edgemotion.rb` on `main`. Ensure repository Actions settings permit this, and allow the bot's Cask commit if `main` has branch protection.
+- The workflow runs on a macOS runner. It builds and tests the package, assembles a universal arm64/x86_64 `EdgeMotion.app`, archives it with `ditto`, and publishes a SHA-256 checksum. It does not sign, notarize, or staple the app.
 
-To encode a key or certificate on macOS without line breaks: `base64 < file.p12 | tr -d '\n'` (substitute the key file as appropriate). Keep private keys and certificate passwords out of Git.
+## Publishing the next version
 
-Ensure GitHub Actions is enabled and workflow `GITHUB_TOKEN` can write repository contents. A protected `main` branch must allow GitHub Actions to commit `Casks/edgemotion.rb`, or the final Cask update will fail even if the Release was uploaded. The release job must run on a macOS runner with Xcode, codesign, and notarytool.
+1. Merge changes into `main`; verify CI is green.
+2. Run `pwsh ./publish-next-version.ps1` from a clean local checkout, using PowerShell 7 and Git.
+3. The script fast-forwards `main`, creates and pushes a tag like `v0.1.0` (or the next patch version), which starts the Release workflow. You may use `-Bump Minor` or `-Bump Major`.
+4. Check the [Release workflow](https://github.com/DimonSmart/EdgeMotionMac/actions/workflows/release.yml) and the [Release page](https://github.com/DimonSmart/EdgeMotionMac/releases) for `EdgeMotion-vX.Y.Z-macos-universal.zip` and `SHA256SUMS.txt`.
+5. Verify `Casks/edgemotion.rb` on `main` was updated with that version and checksum, then test the package on a physical MacBook.
 
-## Publish
+The Cask is created only after the first successful Release, so it does not reference a nonexistent download. If updating the Cask fails after publishing, re-run the Release workflow; it will replace existing Release assets and try the Cask update again.
 
-1. Merge the desired code to `main` and confirm CI passes.
-2. On your Mac, run `pwsh ./publish-next-version.ps1` in the clean repository.
-3. Verify the **Release** GitHub Actions run finishes successfully.
-4. Check the new GitHub Release contains `EdgeMotion-vX.Y.Z-macos-universal.zip` and `SHA256SUMS.txt`.
-5. Confirm `Casks/edgemotion.rb` was committed to `main` with the new version and digest.
-6. On a supported Mac, install through Homebrew and grant **Accessibility** to the bundled app. Qualify raw touch behavior separately on each supported hardware/OS combination.
+## Homebrew installation
 
-The packaging script can be exercised by CI without secrets, but official GitHub releases require real Developer ID signing and notarization. The workflow never publishes an unsigned archive.
-
-The initial Homebrew Cask is intentionally generated only after a successful release, so it never contains a placeholder checksum. The repository itself is used as a Homebrew tap with an explicit URL:
+Use this repository as its own tap (the explicit URL is necessary because this repository is not named `homebrew-edgemotion`):
 
 ```bash
 brew tap dimonsmart/edgemotion https://github.com/DimonSmart/EdgeMotionMac.git
 brew install --cask dimonsmart/edgemotion/edgemotion
 ```
 
-This explicit URL is essential: by default Homebrew expects `dimonsmart/homebrew-edgemotion`, whereas the actual repository is `DimonSmart/EdgeMotionMac`.
+To upgrade: `brew update && brew upgrade --cask dimonsmart/edgemotion/edgemotion`.
 
-The package targets macOS 11+ and includes x86_64 and arm64 binaries. Successful compilation and notarization do **not** establish compatibility of the private MultitouchSupport ABI. The functionality must be validated on real devices before a public release.
+## Gatekeeper: first launch of an unsigned app
+
+**Homebrew cannot give an unsigned app Apple's Developer ID trust.** After a normal installation, macOS may block the initial launch. If you trust the app, attempt to open it, then choose **System Settings → Privacy & Security → Open Anyway**. Grant Accessibility permission to the installed app separately.
+
+The [optional macOS installer](install-macos.sh) installs or upgrades through Homebrew, then removes `com.apple.quarantine` **only from /Applications/EdgeMotion.app**. This bypasses macOS's download assessment for that app; review the script and trust the release before running it. If macOS labels the app damaged despite a verified download, a trusted manual installation may need:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/EdgeMotion.app
+```
+
+Never disable Gatekeeper or SIP globally. EdgeMotion does not require root privileges or drivers. Notarization would not prove compatibility with the undocumented private MultitouchSupport input API; on unsupported devices, the app must remain safely disabled.

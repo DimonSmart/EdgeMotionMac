@@ -65,7 +65,7 @@ try {
     Write-Host "Publishing $tag from $Branch..."
     Invoke-Git -Arguments @("tag", "-a", $tag, "-m", "Release $tag") | Out-Null
     Invoke-Git -Arguments @("push", $Remote, "refs/tags/$tag") | Out-Null
-    Write-Host "Pushed $tag. GitHub Actions will build, notarize and publish it."
+    Write-Host "Pushed $tag. GitHub Actions will publish the unsigned app and update Homebrew."
 }
 finally {
     Pop-Location

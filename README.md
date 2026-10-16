@@ -8,12 +8,14 @@ EdgeMotion is a lightweight macOS menu-bar utility that continues pointer motion
 
 ## Install with Homebrew
 
-After the first signed and notarized [GitHub Release](https://github.com/DimonSmart/EdgeMotionMac/releases) has been published:
+After the first [GitHub Release](https://github.com/DimonSmart/EdgeMotionMac/releases) has been published:
 
 ```bash
 brew tap dimonsmart/edgemotion https://github.com/DimonSmart/EdgeMotionMac.git
 brew install --cask dimonsmart/edgemotion/edgemotion
 ```
+
+**Unsigned download:** macOS may block the first launch. If you trust the release, use **System Settings → Privacy & Security → Open Anyway** after trying to open it. The [optional macOS installation script](docs/install-macos.sh), modeled on CSharpFar, uses Homebrew and removes quarantine **only from `/Applications/EdgeMotion.app`**; review the script before running it.
 
 Launch **EdgeMotion** from Applications. The utility runs in the menu bar rather than the Dock. Grant it **Accessibility** access under **System Settings → Privacy & Security → Accessibility**, then enable EdgeMotion from its menu-bar control. Left-click the menu-bar icon to toggle; right-click for the menu.
 
@@ -25,7 +27,7 @@ brew upgrade --cask dimonsmart/edgemotion/edgemotion
 brew uninstall --cask dimonsmart/edgemotion/edgemotion
 ```
 
-Release archives also support manual installation: download the universal .zip, extract, and move EdgeMotion.app to Applications. A successful build does not guarantee compatibility with every hardware/OS combination; the private input API is undocumented and fails safely when unavailable.
+Release archives also support manual installation: download the universal .zip, extract, and move EdgeMotion.app to Applications. The same Gatekeeper warning may apply. A successful build does not guarantee compatibility with every hardware/OS combination; the private input API is undocumented and fails safely when unavailable.
 
 ## Developer build
 
@@ -56,7 +58,7 @@ Run from an interactive login session on a physical MacBook. Keep another applic
 
 ## Release process
 
-CI builds/tests Swift sources and checks that the packaged app contains arm64 and x86_64. Releases require **Developer ID signing, Hardened Runtime, Apple notarization, and stapling**. The tag workflow publishes the universal app and its checksum, then commits an updated Homebrew Cask to `main`. It deliberately fails without Apple credentials and does not publish an unsigned fallback.
+CI builds/tests Swift sources and checks that the packaged app contains arm64 and x86_64. Releases are **unsigned and unnotarized**, like CSharpFar, and require no Apple Developer certificate or Apple-specific GitHub secrets. The tag workflow publishes the universal `.app` and SHA-256 checksum on GitHub Releases, then commits an updated Homebrew Cask to `main`.
 
 On a Mac with Git and PowerShell installed:
 
@@ -66,7 +68,7 @@ pwsh ./publish-next-version.ps1
 
 The script increments the patch version by default, or use `-Bump Minor` / `-Bump Major`. It requires a clean tree, fast-forwards `main`, creates an annotated `vMAJOR.MINOR.PATCH` tag, and pushes that tag to trigger the release pipeline. The first tag defaults to `v0.1.0`.
 
-Repository maintainers must add the six GitHub Actions secrets described in [Release setup](docs/releasing.md) before pushing a release tag. **No release has been published by this configuration alone.**
+See [Release setup](docs/releasing.md) for required GitHub workflow permissions and unsigned-app installation notes. **No release has been published by this configuration alone.**
 
 ## Limitations and privacy
 
