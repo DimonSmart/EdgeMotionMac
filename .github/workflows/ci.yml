@@ -20,6 +20,18 @@ jobs:
         run: swift test --configuration release
       - name: Check packaging scripts
         run: bash -n scripts/package-macos-app.sh scripts/render-homebrew-cask.sh
+      - name: Parse PowerShell release script
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path publish-next-version.ps1).Path, [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) { throw ($errors | Out-String) }
+      - name: Validate Homebrew Cask template
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/render-homebrew-cask.sh 0.0.0 "$(printf '%064d' 0)" "$RUNNER_TEMP/edgemotion.rb"
       - name: Build universal app bundle
         run: bash scripts/package-macos-app.sh 0.0.0 "$RUNNER_TEMP/package"
       - name: Verify packaged app
