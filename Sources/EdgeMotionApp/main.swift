@@ -7,7 +7,7 @@ import EdgeMotionDiagnosticCore
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private enum StatusAppearance: Equatable { case disabled, enabled, active }
     private enum AppInfo {
-        static let version = "0.1.0"
+        static var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development" }
         static let repositoryURL = URL(string: "https://github.com/DimonSmart/EdgeMotionMac")!
     }
 

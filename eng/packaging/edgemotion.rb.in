@@ -1,0 +1,13 @@
+cask "edgemotion" do
+  version "@VERSION@"
+  sha256 "@SHA256@"
+
+  url "https://github.com/DimonSmart/EdgeMotionMac/releases/download/v#{version}/EdgeMotion-v#{version}-macos-universal.zip"
+  name "EdgeMotion"
+  desc "Keep the macOS pointer moving after reaching the trackpad edge"
+  homepage "https://github.com/DimonSmart/EdgeMotionMac"
+
+  depends_on macos: ">= :big_sur"
+
+  app "EdgeMotion.app"
+end

@@ -4,22 +4,70 @@
 
 **Out of trackpad? Not out of screen.** Keep your Mac cursor moving beyond the edge.
 
+EdgeMotion is a lightweight macOS menu-bar utility that continues pointer motion when you reach the edge of a built-in MacBook trackpad. It uses macOS Accessibility permission for synthetic cursor movement and accesses Apple's private MultitouchSupport framework for touch input.
+
+## Install with Homebrew
+
+After the first signed and notarized [GitHub Release](https://github.com/DimonSmart/EdgeMotionMac/releases) has been published:
+
+\`\`\`bash
+brew tap dimonsmart/edgemotion https://github.com/DimonSmart/EdgeMotionMac.git
+brew install --cask dimonsmart/edgemotion/edgemotion
+\`\`\`
+
+Launch **EdgeMotion** from Applications. The utility runs in the menu bar rather than the Dock. Grant it **Accessibility** access under **System Settings → Privacy & Security → Accessibility**, then enable EdgeMotion from its menu-bar control. Left-click the menu-bar icon to toggle; right-click for the menu.
+
+To update or remove it:
+
+\`\`\`bash
+brew update
+brew upgrade --cask dimonsmart/edgemotion/edgemotion
+brew uninstall --cask dimonsmart/edgemotion/edgemotion
+\`\`\`
+
+Release archives also support manual installation: download the universal .zip, extract, and move EdgeMotion.app to Applications. A successful build does not guarantee compatibility with every hardware/OS combination; the private input API is undocumented and fails safely when unavailable.
+
+## Developer build
+
+Requires macOS and Xcode command-line tools.
+
+\`\`\`bash
+swift test --configuration release
+swift run EdgeMotion
+\`\`\`
+
+Build an unsigned universal app bundle for inspection:
+
+\`\`\`bash
+bash scripts/package-macos-app.sh 0.1.0 /tmp/edgemotion-package
+\`\`\`
+
+Running directly from Terminal and running EdgeMotion.app use different Accessibility permission identities.
+
 ## Hardware feasibility diagnostic
 
-`EdgeMotionHardwareDiagnostic` is a deliberately separate, non-sandboxed command-line harness. It is not the production menu-bar utility and does **not** establish system-wide support until each machine has been exercised on real hardware.
+\`EdgeMotionHardwareDiagnostic\` is a separate, non-sandboxed harness and is not a substitute for device qualification.
 
-## Run a controlled check
-
-Build and run it from an interactive macOS login session on a real MacBook:
-
-```
+\`\`\`bash
 swift run EdgeMotionHardwareDiagnostic --seconds=12 --sample
-```
+\`\`\`
 
-Keep another app in the foreground, then touch, move, and lift one finger on the built-in trackpad; repeat with two fingers. `--sample` prints one decoded frame only. The final summary records callback and frame counts, stability of both `pathIndex` and `fingerID`, disappeared identifiers, finger-up frames, and invalid frames. It never writes touch data to disk.
+Run from an interactive login session on a physical MacBook. Keep another application in the foreground while testing touch/movement. The diagnostic reports frame counts and validity; it does not save raw touch streams. On unsupported inputs, **SAFE DISABLED** is expected and no synthetic output is sent. No root, SIP changes, driver replacement, or kernel extension is needed.
 
-Accessibility is not a prerequisite for reading raw frames. If it is granted, the harness posts exactly one one-pixel public `CGEvent` mouse move after a validated frame as the output proof. If it is unavailable, the raw-touch result remains useful but the Quartz-output part is explicitly unverified.
+## Release process
 
-Record one short evidence entry per machine: `sw_vers`, `uname -m`, `sysctl -n hw.model`, device identity (built-in versus external), private framework/symbol availability, the final summary, foreground-app Quartz output result, and the safe-disable result. Do not retain raw touch history, keyboard data, or event streams.
+CI builds/tests Swift sources and checks that the packaged app contains arm64 and x86_64. Releases require **Developer ID signing, Hardened Runtime, Apple notarization, and stapling**. The tag workflow publishes the universal app and its checksum, then commits an updated Homebrew Cask to \`main\`. It deliberately fails without Apple credentials and does not publish an unsigned fallback.
 
-If a framework/symbol/device/callback/frame check fails, `SAFE DISABLED` is the expected result: there must be no synthetic output. The bridge assumes a reverse-engineered 96-byte `MTTouch` layout and returns `int32_t(0)` from the private callback; a successful run is hardware evidence, not a public Apple API contract. This harness does not require root, SIP changes, a kext, or a driver.
+On a Mac with Git and PowerShell installed:
+
+\`\`\`powershell
+pwsh ./publish-next-version.ps1
+\`\`\`
+
+The script increments the patch version by default, or use \`-Bump Minor\` / \`-Bump Major\`. It requires a clean tree, fast-forwards \`main\`, creates an annotated \`vMAJOR.MINOR.PATCH\` tag, and pushes that tag to trigger the release pipeline. The first tag defaults to \`v0.1.0\`.
+
+Repository maintainers must add the six GitHub Actions secrets described in [Release setup](docs/releasing.md) before pushing a release tag. **No release has been published by this configuration alone.**
+
+## Limitations and privacy
+
+EdgeMotion uses an undocumented Apple framework, so future macOS updates may disable raw touch input. The app does not transmit touch coordinates, record key presses, or run a network service. The GitHub source and the [IDD product specifications](.idd/intent/INDEX.md) describe the remaining limitations and safety requirements.
