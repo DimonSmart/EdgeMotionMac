@@ -1,6 +1,10 @@
 ![EdgeMotion — miniature skateboarder on a MacBook trackpad](assets/social-preview.jpg)
 
-# EdgeMotion hardware feasibility diagnostic
+# EdgeMotion
+
+**Out of trackpad? Not out of screen.** Keep your Mac cursor moving beyond the edge.
+
+## Hardware feasibility diagnostic
 
 `EdgeMotionHardwareDiagnostic` is a deliberately separate, non-sandboxed command-line harness. It is not the production menu-bar utility and does **not** establish system-wide support until each machine has been exercised on real hardware.
 
