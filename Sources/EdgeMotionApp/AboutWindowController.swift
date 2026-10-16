@@ -18,6 +18,7 @@ final class AboutWindowController: NSObject, NSWindowDelegate {
     private var releaseURL: URL?
     private var pendingVersion: ReleaseVersion?
     private var checkTask: Task<Void, Never>?
+    private var checkGeneration = 0
     private var updateTask: Task<Void, Never>?
     private var canCancelUpdate = true
     private var updating = false
@@ -106,6 +107,8 @@ final class AboutWindowController: NSObject, NSWindowDelegate {
     }
 
     private func beginCheck() {
+        checkGeneration += 1
+        let generation = checkGeneration
         pendingVersion = nil
         releaseURL = nil
         releaseButton.isHidden = true
@@ -116,7 +119,7 @@ final class AboutWindowController: NSObject, NSWindowDelegate {
         checkTask = Task { [weak self] in
             guard let self = self else { return }
             let result = await self.checker.check(currentVersion: self.currentVersion)
-            guard !Task.isCancelled else { self.checkTask = nil; return }
+            guard !Task.isCancelled, self.checkGeneration == generation else { return }
             switch result {
             case .upToDate:
                 self.statusLabel.stringValue = "You're up to date."
@@ -128,7 +131,7 @@ final class AboutWindowController: NSObject, NSWindowDelegate {
                 self.releaseButton.isHidden = false
                 self.statusLabel.stringValue = "Version \(version) is available. Checking installation..."
                 let availability = await self.installer.availability()
-                guard !Task.isCancelled else { self.checkTask = nil; return }
+                guard !Task.isCancelled, self.checkGeneration == generation else { return }
                 switch availability {
                 case .available:
                     self.statusLabel.stringValue = "Version \(version) is available via Homebrew."
@@ -219,6 +222,7 @@ final class AboutWindowController: NSObject, NSWindowDelegate {
             closeAbout()
             return false
         }
+        checkGeneration += 1
         checkTask?.cancel()
         checkTask = nil
         return true
