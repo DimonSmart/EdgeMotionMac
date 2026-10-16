@@ -50,6 +50,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
     }
 
+    @MainActor func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        aboutController?.blocksApplicationTermination == true ? .terminateCancel : .terminateNow
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         if let globalKeyMonitor { NSEvent.removeMonitor(globalKeyMonitor) }
         if let localKeyMonitor { NSEvent.removeMonitor(localKeyMonitor) }
@@ -216,7 +220,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         aboutController?.present()
     }
     @objc private func openRepository() { NSWorkspace.shared.open(AppInfo.repositoryURL) }
-    @objc private func quit() { disable(); NSApp.terminate(nil) }
+    @MainActor @objc private func quit() {
+        guard aboutController?.blocksApplicationTermination != true else { return }
+        disable()
+        NSApp.terminate(nil)
+    }
 }
 
 struct EdgeMotionMain {

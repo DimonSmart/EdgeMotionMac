@@ -21,6 +21,9 @@ final class AboutWindowController: NSObject, NSWindowDelegate {
     private var updateTask: Task<Void, Never>?
     private var canCancelUpdate = true
     private var updating = false
+    private var restarting = false
+
+    var blocksApplicationTermination: Bool { updating || restarting }
 
     init(currentVersion: String,
          checker: GitHubReleaseChecker = GitHubReleaseChecker(),
@@ -182,13 +185,16 @@ final class AboutWindowController: NSObject, NSWindowDelegate {
                 self.statusLabel.stringValue = message
                 self.updateButton.isHidden = false
             case .installed(let installed):
+                self.restarting = true
                 self.statusLabel.stringValue = "Restarting EdgeMotion \(installed)..."
                 self.prepareForRestart()
                 let result = await LocalUpdateCommandRunner().run("/usr/bin/open",
                     ["-n", HomebrewUpdateInstaller.appPath], cancellable: false)
                 if result.exitCode == 0 {
+                    self.restarting = false
                     self.restartSucceeded()
                 } else {
+                    self.restarting = false
                     self.restartFailed()
                     self.statusLabel.stringValue = "Updated to \(installed), but restart failed. Start EdgeMotion again from Applications."
                 }
