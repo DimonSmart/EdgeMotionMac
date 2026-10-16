@@ -18,6 +18,6 @@ let package = Package(
         .target(name: "EdgeMotionCore", dependencies: ["EdgeMotionDiagnosticCore"]),
         .executableTarget(name: "EdgeMotionHardwareDiagnostic", dependencies: ["EdgeMotionDiagnosticCore"]),
         .executableTarget(name: "EdgeMotionApp", dependencies: ["EdgeMotionCore", "EdgeMotionDiagnosticCore", "EdgeMotionDiagnosticBridge"]),
-        .testTarget(name: "EdgeMotionDiagnosticCoreTests", dependencies: ["EdgeMotionDiagnosticCore"])
+        .testTarget(name: "EdgeMotionDiagnosticCoreTests", dependencies: ["EdgeMotionDiagnosticCore", "EdgeMotionCore"])
     ]
 )

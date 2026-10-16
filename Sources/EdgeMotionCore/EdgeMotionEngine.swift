@@ -5,37 +5,51 @@ public struct EdgeMotionConfiguration: Sendable {
     public var edgeWidth = 0.06
     public var hysteresis = 0.015
     public var holdDelay: TimeInterval = 0.1
-    public var minimumOutwardVelocity = 0.20
-    public var initialSpeed: Double = 180
+    public var velocityLookback: TimeInterval = 0.5
     public var maximumSpeed: Double = 750
-    public var accelerationRamp: TimeInterval = 0.9
 
     public init() {}
 }
 
 public enum EdgeMotionState: Equatable, Sendable { case idle, tracking, armed, active, suppressed }
-public struct CursorDelta: Equatable, Sendable { public let x: Double; public let y: Double }
+public struct CursorDelta: Equatable, Sendable {
+    public let x: Double
+    public let y: Double
+
+    public init(x: Double, y: Double) {
+        self.x = x
+        self.y = y
+    }
+}
 
 /// Pure state machine: platform input and Quartz output stay outside this type.
 public final class EdgeMotionEngine: @unchecked Sendable {
     public private(set) var state: EdgeMotionState = .idle
     public var configuration: EdgeMotionConfiguration
+    private var trackedDeviceID: Int64?
     private var trackedPathIndex: Int?
     private var trackedFingerID: Int?
     private var lastContact: Contact?
-    private var lastTimestamp: TimeInterval?
+    private var recentContacts: [Contact] = []
+    private var hasApproachedAnEdgeFromInside = false
+    private var wasInsideActivationZone = false
     private var direction = CursorDelta(x: 0, y: 0)
+    private var initialActiveSpeed = 0.0
     private var armedAt: TimeInterval?
-    private var activeAt: TimeInterval?
+    private var lastTickAt: TimeInterval?
 
     public init(configuration: EdgeMotionConfiguration = .init()) { self.configuration = configuration }
 
-    public func accept(_ frame: ContactFrame) {
+    public func accept(_ frame: ContactFrame, cursorVelocity: CursorDelta? = nil) {
         guard frame.contacts.count == 1, let contact = frame.contacts.first, contact.phase != .ended else {
             reset(suppress: !frame.contacts.isEmpty)
             return
         }
         if state == .suppressed { return }
+        if let trackedDeviceID, trackedDeviceID != contact.deviceID {
+            reset(suppress: true)
+            return
+        }
         if let trackedPathIndex, let trackedFingerID,
            trackedPathIndex != contact.pathIndex && trackedFingerID != contact.fingerID {
             reset(suppress: true)
@@ -47,23 +61,28 @@ public final class EdgeMotionEngine: @unchecked Sendable {
         // The private API exposes two observed identifiers. Either may be
         // transient on the first frames, so only a change in both identifies a
         // replacement contact; retain the newest observed pair otherwise.
+        trackedDeviceID = contact.deviceID
         trackedPathIndex = contact.pathIndex
         trackedFingerID = contact.fingerID
 
-        let velocity = calculateVelocity(for: contact)
+        let velocity = recentVelocity(including: contact)
         lastContact = contact
-        lastTimestamp = frame.timestamp
         guard let edgeDirection = outwardEdgeDirection(for: contact), isStillInsideActivationZone(contact) else {
+            hasApproachedAnEdgeFromInside = true
+            wasInsideActivationZone = false
             if state == .armed { state = .tracking; armedAt = nil }
             if state == .active, isOutsideHysteresis(contact) { reset(suppress: false) }
             return
         }
         let outward = velocity.x * edgeDirection.x + velocity.y * edgeDirection.y
-        if state == .tracking, outward >= configuration.minimumOutwardVelocity {
+        let enteredActivationZone = !wasInsideActivationZone
+        wasInsideActivationZone = true
+        if state == .tracking, hasApproachedAnEdgeFromInside, enteredActivationZone, outward > 0 {
             direction = normalized(velocity, fallback: edgeDirection)
+            initialActiveSpeed = min(configuration.maximumSpeed, max(0, cursorVelocity.map { hypot($0.x, $0.y) } ?? 0))
             armedAt = frame.timestamp
             state = .armed
-        } else if state == .armed, outward <= -configuration.minimumOutwardVelocity {
+        } else if state == .armed, outward < 0 {
             state = .tracking; armedAt = nil
         }
     }
@@ -73,23 +92,27 @@ public final class EdgeMotionEngine: @unchecked Sendable {
         guard let contact = lastContact, !isOutsideHysteresis(contact) else { reset(suppress: false); return nil }
         if state == .armed {
             guard timestamp - armedAt >= configuration.holdDelay else { return nil }
-            state = .active; activeAt = timestamp
+            state = .active
+            lastTickAt = timestamp
+            return nil
         }
-        let elapsed = max(0, timestamp - (activeAt ?? timestamp))
-        let progress = min(1, elapsed / configuration.accelerationRamp)
-        let speed = configuration.initialSpeed + (configuration.maximumSpeed - configuration.initialSpeed) * progress
-        // The display timer supplies ~1/60-second ticks; the exact elapsed time
-        // is deliberately carried by the caller in later integration work.
-        return CursorDelta(x: direction.x * speed / 60, y: -direction.y * speed / 60)
+        guard let previousTick = lastTickAt, timestamp >= previousTick else { return nil }
+        let deltaTime = timestamp - previousTick
+        lastTickAt = timestamp
+        guard deltaTime > 0 else { return nil }
+        return CursorDelta(x: direction.x * initialActiveSpeed * deltaTime, y: -direction.y * initialActiveSpeed * deltaTime)
     }
 
     public func stop() { reset(suppress: false) }
 
-    private func calculateVelocity(for contact: Contact) -> CursorDelta {
-        guard let previous = lastContact, let previousTime = lastTimestamp else { return CursorDelta(x: 0, y: 0) }
-        let dt = contact.timestamp - previousTime
+    private func recentVelocity(including contact: Contact) -> CursorDelta {
+        recentContacts.append(contact)
+        let earliestTimestamp = contact.timestamp - max(0, configuration.velocityLookback)
+        recentContacts.removeAll { $0.timestamp < earliestTimestamp }
+        guard let oldest = recentContacts.first else { return CursorDelta(x: 0, y: 0) }
+        let dt = contact.timestamp - oldest.timestamp
         guard dt > 0 else { return CursorDelta(x: 0, y: 0) }
-        return CursorDelta(x: (contact.x - previous.x) / dt, y: (contact.y - previous.y) / dt)
+        return CursorDelta(x: (contact.x - oldest.x) / dt, y: (contact.y - oldest.y) / dt)
     }
 
     private func outwardEdgeDirection(for contact: Contact) -> CursorDelta? {
@@ -112,8 +135,10 @@ public final class EdgeMotionEngine: @unchecked Sendable {
     }
     private func reset(suppress: Bool) {
         state = suppress ? .suppressed : .idle
-        trackedPathIndex = nil; trackedFingerID = nil
-        lastContact = nil; lastTimestamp = nil; armedAt = nil; activeAt = nil
+        trackedDeviceID = nil; trackedPathIndex = nil; trackedFingerID = nil
+        lastContact = nil; recentContacts.removeAll(); hasApproachedAnEdgeFromInside = false; wasInsideActivationZone = false; armedAt = nil
+        lastTickAt = nil
+        initialActiveSpeed = 0
         direction = CursorDelta(x: 0, y: 0)
     }
 }

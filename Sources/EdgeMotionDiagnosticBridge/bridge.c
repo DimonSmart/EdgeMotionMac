@@ -5,7 +5,6 @@
 #include <stdatomic.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <string.h>
 
 // All MultitouchSupport declarations in this file are reverse-engineered ABI
@@ -37,6 +36,10 @@ typedef OSStatus (*MTDeviceStopFn)(MTDeviceRef);
 static void *framework;
 // Retained until process exit: values returned by CFArrayGetValueAtIndex do
 // not become caller-owned after the array is released.
+// This list owns the framework device values. It intentionally outlives
+// start/stop cycles: the private API provides no qualified unregister
+// contract, so releasing it while a callback may still be in flight would be
+// less safe than retaining it for this process-lifetime bridge session.
 static CFArrayRef activeDeviceList;
 static MTDeviceRef activeDevice;
 static MTDeviceCreateListFn createList;
@@ -50,11 +53,15 @@ static _Atomic int32_t bridgeState = EMBridgeUnavailable;
 static char failureReason[160] = "not prepared";
 
 static void setFailure(const char *reason) {
-    snprintf(failureReason, sizeof(failureReason), "%s", reason);
+    size_t length = strlen(reason);
+    if (length >= sizeof(failureReason)) length = sizeof(failureReason) - 1;
+    memcpy(failureReason, reason, length);
+    failureReason[length] = '\0';
 }
 
 static void setStartFailure(OSStatus status) {
-    snprintf(failureReason, sizeof(failureReason), "MTDeviceStart failed (OSStatus %d)", (int)status);
+    (void)status;
+    setFailure("MTDeviceStart failed");
 }
 
 static bool finiteUnit(float value) {
@@ -156,16 +163,18 @@ bool EMBridgeStartBuiltIn(EMFrameCallback callback, void *context) {
         }
         return false;
     }
-    activeDeviceList = createList();
     if (!activeDeviceList) {
-        setFailure("device enumeration failed");
-        atomic_store_explicit(&bridgeState, EMBridgeDisabled, memory_order_release);
-        return false;
-    }
-    CFIndex deviceCount = CFArrayGetCount(activeDeviceList);
-    for (CFIndex i = 0; i < deviceCount; i++) {
-        MTDeviceRef device = (MTDeviceRef)CFArrayGetValueAtIndex(activeDeviceList, i);
-        if (device && isBuiltIn(device)) { activeDevice = device; break; }
+        activeDeviceList = createList();
+        if (!activeDeviceList) {
+            setFailure("device enumeration failed");
+            atomic_store_explicit(&bridgeState, EMBridgeDisabled, memory_order_release);
+            return false;
+        }
+        CFIndex deviceCount = CFArrayGetCount(activeDeviceList);
+        for (CFIndex i = 0; i < deviceCount; i++) {
+            MTDeviceRef device = (MTDeviceRef)CFArrayGetValueAtIndex(activeDeviceList, i);
+            if (device && isBuiltIn(device)) { activeDevice = device; break; }
+        }
     }
     if (!activeDevice) {
         setFailure("no compatible built-in trackpad");
@@ -191,9 +200,10 @@ void EMBridgeStop(void) {
     if (atomic_exchange_explicit(&bridgeState, EMBridgeReady, memory_order_acq_rel) == EMBridgeRunning && stopDevice && activeDevice) {
         (void)stopDevice(activeDevice);
     }
-    // Intentionally do not unregister the private callback or release the
-    // device array/framework. The diagnostic exits immediately after stop;
-    // production shutdown/reconnect needs separate hardware qualification.
+    // Private callback unregister/reconnect is intentionally not inferred from
+    // the reverse-engineered ABI. The retained framework/list/context remain
+    // valid for this process-lifetime session; qualified reconnect support is
+    // a separate hardware task.
 }
 
 EMBridgeState EMBridgeCurrentState(void) {

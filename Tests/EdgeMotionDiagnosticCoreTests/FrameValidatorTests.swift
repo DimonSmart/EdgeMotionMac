@@ -7,19 +7,19 @@ final class FrameValidatorTests: XCTestCase {
         return ContactFrame(contacts: contacts ?? [Contact(deviceID: 1, pathIndex: 2, fingerID: 2, x: 0.5, y: 0.5, timestamp: timestamp, phase: .moved)], timestamp: timestamp, sequence: sequence)
     }
     func testAcceptsNormalizedUniqueContactsAndIncreasingSequence() {
-        XCTAssertEqual(FrameValidator.validate(frame(), previousSequence: 0), .success(()))
+        XCTAssertSuccess(FrameValidator.validate(frame(), previousSequence: 0))
     }
     func testRejectsInvalidCoordinatesAndDuplicateIdentity() {
-        XCTAssertEqual(FrameValidator.validate(frame(contacts: [Contact(deviceID: 1, pathIndex: 1, fingerID: 1, x: 1.1, y: 0, timestamp: 10, phase: .moved)]), previousSequence: nil), .failure(.invalidCoordinate))
-        XCTAssertEqual(FrameValidator.validate(frame(contacts: [Contact(deviceID: 1, pathIndex: 1, fingerID: 1, x: 0, y: 0, timestamp: 10, phase: .moved), Contact(deviceID: 1, pathIndex: 1, fingerID: 1, x: 0, y: 0, timestamp: 10, phase: .ended)]), previousSequence: nil), .failure(.duplicateIdentity))
+        XCTAssertFailure(FrameValidator.validate(frame(contacts: [Contact(deviceID: 1, pathIndex: 1, fingerID: 1, x: 1.1, y: 0, timestamp: 10, phase: .moved)]), previousSequence: nil), .invalidCoordinate)
+        XCTAssertFailure(FrameValidator.validate(frame(contacts: [Contact(deviceID: 1, pathIndex: 1, fingerID: 1, x: 0, y: 0, timestamp: 10, phase: .moved), Contact(deviceID: 1, pathIndex: 1, fingerID: 1, x: 0, y: 0, timestamp: 10, phase: .ended)]), previousSequence: nil), .duplicateIdentity)
     }
 
     func testRejectsNegativePathIndex() {
-        XCTAssertEqual(FrameValidator.validate(frame(contacts: [Contact(deviceID: 1, pathIndex: -1, fingerID: 1, x: 0, y: 0, timestamp: 10, phase: .moved)]), previousSequence: nil), .failure(.invalidIdentity))
+        XCTAssertFailure(FrameValidator.validate(frame(contacts: [Contact(deviceID: 1, pathIndex: -1, fingerID: 1, x: 0, y: 0, timestamp: 10, phase: .moved)]), previousSequence: nil), .invalidIdentity)
     }
     func testRejectsNonMonotonicAndInconsistentFrames() {
-        XCTAssertEqual(FrameValidator.validate(frame(sequence: 4), previousSequence: 4), .failure(.invalidSequence))
-        XCTAssertEqual(FrameValidator.validate(frame(contacts: [Contact(deviceID: 1, pathIndex: 1, fingerID: 1, x: 0, y: 0, timestamp: 11, phase: .moved)]), previousSequence: nil), .failure(.inconsistentTimestamp))
+        XCTAssertFailure(FrameValidator.validate(frame(sequence: 4), previousSequence: 4), .invalidSequence)
+        XCTAssertFailure(FrameValidator.validate(frame(contacts: [Contact(deviceID: 1, pathIndex: 1, fingerID: 1, x: 0, y: 0, timestamp: 11, phase: .moved)]), previousSequence: nil), .inconsistentTimestamp)
     }
     func testInvalidFrameDisablesBeforeOutput() {
         let session = DiagnosticSession(); session.startIfReady(true)
@@ -72,5 +72,21 @@ final class FrameValidatorTests: XCTestCase {
         XCTAssertEqual(completions.wait(timeout: .now() + 1), .success)
         XCTAssertEqual(wins, 1)
         XCTAssertNotNil(lifecycle.outcome)
+    }
+
+    private func XCTAssertSuccess(_ result: Result<Void, FrameValidationError>, file: StaticString = #filePath, line: UInt = #line) {
+        if case .failure(let error) = result { XCTFail("Expected success, got \(error)", file: file, line: line) }
+    }
+
+    private func XCTAssertFailure(_ result: Result<Void, FrameValidationError>, _ expected: FrameValidationError, file: StaticString = #filePath, line: UInt = #line) {
+        guard case .failure(let actual) = result else { return XCTFail("Expected failure \(expected)", file: file, line: line) }
+        XCTAssertEqual(actual, expected, file: file, line: line)
+    }
+}
+
+final class QuartzOutputTests: XCTestCase {
+    func testUsesDragEventWhileLeftButtonIsHeld() {
+        XCTAssertEqual(QuartzOutput.mouseEventType(isLeftButtonPressed: false), .mouseMoved)
+        XCTAssertEqual(QuartzOutput.mouseEventType(isLeftButtonPressed: true), .leftMouseDragged)
     }
 }

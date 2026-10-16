@@ -5,19 +5,14 @@ import EdgeMotionDiagnosticBridge
 
 private struct Options {
     let seconds: TimeInterval
-    let sample: Bool
-
     init(arguments: [String]) {
         var parsedSeconds: TimeInterval = 12
-        var parsedSample = false
         for argument in arguments.dropFirst() {
-            if argument == "--sample" { parsedSample = true }
             if argument.hasPrefix("--seconds="), let seconds = TimeInterval(argument.dropFirst("--seconds=".count)), seconds > 0, seconds <= 60 {
                 parsedSeconds = seconds
             }
         }
         seconds = parsedSeconds
-        sample = parsedSample
     }
 }
 
@@ -39,17 +34,14 @@ final class DiagnosticRunner: @unchecked Sendable {
     private let processingQueue = DispatchQueue(label: "EdgeMotionHardwareDiagnostic.processing")
     private let lock = NSLock()
     private let mainRunLoop = CFRunLoopGetMain()
-    private let printSample: Bool
     private let accessibilityTrusted: Bool
     private var pendingFrame = false
     private var summary = ProbeSummary()
     private var previousPathIDs = Set<Int>()
     private var previousFingerIDs = Set<Int>()
-    private var didPrintSample = false
     private var didPostQuartzProof = false
 
-    init(sample: Bool, accessibilityTrusted: Bool) {
-        printSample = sample
+    init(accessibilityTrusted: Bool) {
         self.accessibilityTrusted = accessibilityTrusted
     }
 
@@ -124,11 +116,6 @@ final class DiagnosticRunner: @unchecked Sendable {
             previousPathIDs = paths
             previousFingerIDs = fingers
             if frame.contacts.contains(where: { $0.phase == .ended }) { summary.fingerUpFrames += 1 }
-            if printSample && !didPrintSample {
-                didPrintSample = true
-                let contacts = frame.contacts.map { "path=\($0.pathIndex) finger=\($0.fingerID) xy=(\($0.x),\($0.y)) phase=\($0.phase)" }.joined(separator: ", ")
-                print("sample frame \(frame.sequence) t=\(frame.timestamp): \(contacts)")
-            }
         }
     }
 
@@ -147,7 +134,7 @@ final class DiagnosticRunner: @unchecked Sendable {
         }
         guard shouldPost else { return }
         let current = CGEvent(source: nil)?.location ?? .zero
-        guard QuartzDiagnosticOutput.postMouseMove(to: CGPoint(x: current.x + 1, y: current.y)) else {
+        guard QuartzOutput.postMouseMove(to: CGPoint(x: current.x + 1, y: current.y)) else {
             finish(reason: "Accessibility trust was lost before Quartz output", outcome: .disabled)
             return
         }
@@ -161,14 +148,14 @@ final class DiagnosticRunner: @unchecked Sendable {
 }
 
 private let options = Options(arguments: CommandLine.arguments)
-private let accessibilityTrusted = QuartzDiagnosticOutput.isAccessibilityTrusted
+private let accessibilityTrusted = QuartzOutput.isAccessibilityTrusted
 print("Accessibility trust: \(accessibilityTrusted ? "granted; one Quartz proof will be sent" : "not granted; raw-touch probe continues without Quartz output")")
 guard EMBridgePrepare() == EMBridgeReady else {
     print("SAFE DISABLED: \(String(cString: EMBridgeFailureReason()))")
     exit(0)
 }
 
-let runner = DiagnosticRunner(sample: options.sample, accessibilityTrusted: accessibilityTrusted)
+let runner = DiagnosticRunner(accessibilityTrusted: accessibilityTrusted)
 let callback: @convention(c) (EMDecodedFrame, UnsafeMutableRawPointer?) -> Void = { frame, _ in runner.receive(frame) }
 runner.prepareForCallbackDelivery()
 guard EMBridgeStartBuiltIn(callback, nil) else {
