@@ -219,7 +219,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func quit() { disable(); NSApp.terminate(nil) }
 }
 
-@main
 struct EdgeMotionMain {
     static func main() {
         let app = NSApplication.shared
@@ -229,6 +228,8 @@ struct EdgeMotionMain {
         app.run()
     }
 }
+
+EdgeMotionMain.main()
 
 private let multitouchCallback: @convention(c) (EMDecodedFrame, UnsafeMutableRawPointer?) -> Void = { raw, context in
     // Copy before returning from the private callback, then process on the app
