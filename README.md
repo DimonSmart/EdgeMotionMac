@@ -70,6 +70,14 @@ The script increments the patch version by default, or use `-Bump Minor` / `-Bum
 
 See [Release setup](docs/releasing.md) for required GitHub workflow permissions and unsigned-app installation notes. **No release has been published by this configuration alone.**
 
+## Update from About
+
+Open the EdgeMotion menu-bar menu (right-click its icon) and choose **About EdgeMotion**.
+The About window checks the latest stable GitHub Release when opened.
+For a standard Homebrew-managed /Applications/EdgeMotion.app installation, a newer release offers **Update now**. EdgeMotion runs a targeted Homebrew Cask update, verifies the installed app, removes quarantine from that unsigned app only, and restarts. Manual ZIP installations and developer builds can open the release page instead; they are never silently replaced.
+
+An offline GitHub check or an unavailable Homebrew package does not stop cursor operation. The updater does not require an Apple Developer certificate. Because EdgeMotion is unsigned, you may need to re-enable **Accessibility** after a version change.
+
 ## Limitations and privacy
 
 EdgeMotion uses an undocumented Apple framework, so future macOS updates may disable raw touch input. The app does not transmit touch coordinates, record key presses, or run a network service. The GitHub source and the [IDD product specifications](.idd/intent/INDEX.md) describe the remaining limitations and safety requirements.

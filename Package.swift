@@ -16,8 +16,10 @@ let package = Package(
         ),
         .target(name: "EdgeMotionDiagnosticCore", dependencies: ["EdgeMotionDiagnosticBridge"]),
         .target(name: "EdgeMotionCore", dependencies: ["EdgeMotionDiagnosticCore"]),
+        .target(name: "EdgeMotionUpdateCore"),
         .executableTarget(name: "EdgeMotionHardwareDiagnostic", dependencies: ["EdgeMotionDiagnosticCore"]),
-        .executableTarget(name: "EdgeMotionApp", dependencies: ["EdgeMotionCore", "EdgeMotionDiagnosticCore", "EdgeMotionDiagnosticBridge"]),
-        .testTarget(name: "EdgeMotionDiagnosticCoreTests", dependencies: ["EdgeMotionDiagnosticCore", "EdgeMotionCore"])
+        .executableTarget(name: "EdgeMotionApp", dependencies: ["EdgeMotionCore", "EdgeMotionDiagnosticCore", "EdgeMotionDiagnosticBridge", "EdgeMotionUpdateCore"]),
+        .testTarget(name: "EdgeMotionDiagnosticCoreTests", dependencies: ["EdgeMotionDiagnosticCore", "EdgeMotionCore"]),
+        .testTarget(name: "EdgeMotionUpdateCoreTests", dependencies: ["EdgeMotionUpdateCore"])
     ]
 )

@@ -23,6 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastCursorSample: (location: CGPoint, timestamp: TimeInterval)?
     private var enabled = false
     private var displayedAppearance: StatusAppearance?
+    private var aboutController: AboutWindowController?
+    private var restartingAfterUpdate = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -84,6 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggle() {
+        guard !restartingAfterUpdate else { return }
         enabled ? disable() : enable()
     }
 
@@ -194,15 +197,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showBridgeError() {
         let alert = NSAlert(); alert.messageText = "EdgeMotion stayed disabled"; alert.informativeText = String(cString: EMBridgeFailureReason()); alert.runModal()
     }
-    @objc private func showAbout() {
-        let alert = NSAlert()
-        alert.messageText = "EdgeMotion"
-        alert.informativeText = "Version " + AppInfo.version + "\n\nRepository: " + AppInfo.repositoryURL.absoluteString
-        alert.addButton(withTitle: "Open Repository")
-        alert.addButton(withTitle: "Close")
-        if alert.runModal() == .alertFirstButtonReturn {
-            openRepository()
+    @MainActor @objc private func showAbout() {
+        if aboutController == nil {
+            aboutController = AboutWindowController(
+                currentVersion: AppInfo.version,
+                prepareForRestart: { [weak self] in
+                    self?.restartingAfterUpdate = true
+                    self?.disable()
+                },
+                restartFailed: { [weak self] in
+                    self?.restartingAfterUpdate = false
+                },
+                restartSucceeded: {
+                    NSApp.terminate(nil)
+                }
+            )
         }
+        aboutController?.present()
     }
     @objc private func openRepository() { NSWorkspace.shared.open(AppInfo.repositoryURL) }
     @objc private func quit() { disable(); NSApp.terminate(nil) }
