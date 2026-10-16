@@ -101,11 +101,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func disable() {
-        enabled = false; engine.stop(); lastSequence = nil; inputClockOffset = nil; lastCursorSample = nil
-        timer?.invalidate(); timer = nil
-        EMBridgeStop()
+        enabled = false
+        stopInputSession()
         updateStatusAppearance()
         toggleItem.title = "Enable EdgeMotion"
+    }
+
+    private func stopInputSession() {
+        engine.stop(); lastSequence = nil; inputClockOffset = nil; lastCursorSample = nil
+        timer?.invalidate(); timer = nil
+        EMBridgeStop()
     }
 
     fileprivate func accept(_ frame: ContactFrame?) {
@@ -126,7 +131,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 engine.stop()
                 updateStatusAppearance()
             } else {
-                disable()
+                // Stop only the failed input session. The user's enabled
+                // choice remains intact and can be explicitly turned off or
+                // retried after the bridge returns to its ready state.
+                stopInputSession()
+                updateStatusAppearance()
             }
             return
         }
