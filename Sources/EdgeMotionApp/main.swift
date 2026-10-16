@@ -6,10 +6,17 @@ import EdgeMotionDiagnosticCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private enum StatusAppearance: Equatable { case disabled, enabled, active }
+    private enum AppInfo {
+        static let version = "0.1.0"
+        static let repositoryURL = URL(string: "https://github.com/DimonSmart/EdgeMotionMac")!
+    }
 
     private let engine = EdgeMotionEngine()
     private var statusItem: NSStatusItem!
+    private var statusMenu: NSMenu!
     private var toggleItem: NSMenuItem!
+    private var globalKeyMonitor: Any?
+    private var localKeyMonitor: Any?
     private var timer: Timer?
     private var lastSequence: Int64?
     private var inputClockOffset: TimeInterval?
@@ -25,11 +32,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         toggleItem.target = self
         toggleItem.keyEquivalentModifierMask = [.option, .command]
         menu.addItem(.separator())
+        let aboutItem = menu.addItem(withTitle: "About EdgeMotion " + AppInfo.version, action: #selector(showAbout), keyEquivalent: "")
+        aboutItem.target = self
+        let repositoryItem = menu.addItem(withTitle: "Open Repository", action: #selector(openRepository), keyEquivalent: "")
+        repositoryItem.target = self
+        menu.addItem(.separator())
         let quitItem = menu.addItem(withTitle: "Quit EdgeMotion", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
-        statusItem.menu = menu
+        statusMenu = menu
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(handleStatusItemClick(_:))
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        installToggleShortcut()
         updateStatusAppearance()
         NSApp.setActivationPolicy(.accessory)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        if let globalKeyMonitor { NSEvent.removeMonitor(globalKeyMonitor) }
+        if let localKeyMonitor { NSEvent.removeMonitor(localKeyMonitor) }
+    }
+
+    @objc private func handleStatusItemClick(_ sender: NSStatusBarButton) {
+        guard let event = NSApp.currentEvent else {
+            toggle()
+            return
+        }
+        if event.type == .rightMouseUp || event.modifierFlags.contains(.control) {
+            statusMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 4), in: sender)
+        } else {
+            toggle()
+        }
+    }
+
+    private func installToggleShortcut() {
+        let handle: (NSEvent) -> Bool = { [weak self] event in
+            guard event.type == .keyDown,
+                  !event.isARepeat,
+                  event.charactersIgnoringModifiers?.lowercased() == "e",
+                  event.modifierFlags.contains([.option, .command]),
+                  !event.modifierFlags.contains([.control, .shift]) else { return false }
+            self?.toggle()
+            return true
+        }
+        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
+            _ = handle(event)
+        }
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            handle(event) ? nil : event
+        }
     }
 
     @objc private func toggle() {
@@ -66,7 +117,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         guard case .success = FrameValidator.validate(frame, previousSequence: lastSequence) else {
-            disable(); return
+            // A private-framework startup callback may contain a transient
+            // malformed frame. Keep the user's enabled choice, but discard
+            // the frame and keep all cursor output stopped until a valid
+            // sequence arrives. Once a valid sequence has begun, a malformed
+            // frame is a safety failure and disables the session.
+            if lastSequence == nil {
+                engine.stop()
+                updateStatusAppearance()
+            } else {
+                disable()
+            }
+            return
         }
         lastSequence = frame.sequence
         // Both hold and motion ticks use the input timestamp domain. Calibrate
@@ -123,6 +185,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showBridgeError() {
         let alert = NSAlert(); alert.messageText = "EdgeMotion stayed disabled"; alert.informativeText = String(cString: EMBridgeFailureReason()); alert.runModal()
     }
+    @objc private func showAbout() {
+        let alert = NSAlert()
+        alert.messageText = "EdgeMotion"
+        alert.informativeText = "Version " + AppInfo.version + "\n\nRepository: " + AppInfo.repositoryURL.absoluteString
+        alert.addButton(withTitle: "Open Repository")
+        alert.addButton(withTitle: "Close")
+        if alert.runModal() == .alertFirstButtonReturn {
+            openRepository()
+        }
+    }
+    @objc private func openRepository() { NSWorkspace.shared.open(AppInfo.repositoryURL) }
     @objc private func quit() { disable(); NSApp.terminate(nil) }
 }
 
