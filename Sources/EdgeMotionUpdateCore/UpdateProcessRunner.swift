@@ -33,7 +33,7 @@ public struct LocalUpdateCommandRunner: UpdateCommandRunning {
     }
 }
 
-private final class RunningCommand {
+private final class RunningCommand: @unchecked Sendable {
     private let lock = NSLock()
     private var process: Process?
     private var cancelled = false
