@@ -46,16 +46,6 @@ bash scripts/package-macos-app.sh 0.1.0 /tmp/edgemotion-package
 
 Running directly from Terminal and running EdgeMotion.app use different Accessibility permission identities.
 
-## Hardware feasibility diagnostic
-
-`EdgeMotionHardwareDiagnostic` is a separate, non-sandboxed harness and is not a substitute for device qualification.
-
-```bash
-swift run EdgeMotionHardwareDiagnostic --seconds=12 --sample
-```
-
-Run from an interactive login session on a physical MacBook. Keep another application in the foreground while testing touch/movement. The diagnostic reports frame counts and validity; it does not save raw touch streams. On unsupported inputs, **SAFE DISABLED** is expected and no synthetic output is sent. No root, SIP changes, driver replacement, or kernel extension is needed.
-
 ## Release process
 
 CI builds/tests Swift sources and checks that the packaged app contains arm64 and x86_64. Releases are **unsigned and unnotarized**, like CSharpFar, and require no Apple Developer certificate or Apple-specific GitHub secrets. The tag workflow publishes the universal `.app` and SHA-256 checksum on GitHub Releases, then commits an updated Homebrew Cask to `main`.
@@ -80,4 +70,4 @@ An offline GitHub check or an unavailable Homebrew package does not stop cursor 
 
 ## Limitations and privacy
 
-EdgeMotion uses an undocumented Apple framework, so future macOS updates may disable raw touch input. The app does not transmit touch coordinates, record key presses, or run a network service. The GitHub source and the [IDD product specifications](.idd/intent/INDEX.md) describe the remaining limitations and safety requirements.
+EdgeMotion uses an undocumented Apple framework, so future macOS updates may disable raw touch input. The app does not transmit touch coordinates, record key presses, or run a network service. The GitHub source and the [IDD product specifications](.idd/intent/INDEX.md) describe the remaining limitations and safety requirements. The [architecture decision](.idd/intent/IDD-0006.adr-private-input-public-output.md) and [recorded hardware feasibility experiment](.idd/intent/IDD-0007.spike-multitouch-feasibility.md) document the technical approach and its limited validation.

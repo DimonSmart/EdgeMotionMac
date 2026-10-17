@@ -1,5 +1,5 @@
 import Foundation
-import EdgeMotionDiagnosticCore
+import EdgeMotionInputCore
 
 public struct EdgeMotionConfiguration: Sendable {
     public var edgeWidth = 0.06

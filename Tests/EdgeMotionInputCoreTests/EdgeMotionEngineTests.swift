@@ -1,6 +1,6 @@
 import XCTest
 import EdgeMotionCore
-@testable import EdgeMotionDiagnosticCore
+@testable import EdgeMotionInputCore
 
 final class EdgeMotionEngineTests: XCTestCase {
     private func contact(

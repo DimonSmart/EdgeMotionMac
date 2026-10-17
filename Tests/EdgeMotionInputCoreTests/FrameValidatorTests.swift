@@ -1,5 +1,5 @@
 import XCTest
-@testable import EdgeMotionDiagnosticCore
+@testable import EdgeMotionInputCore
 
 final class FrameValidatorTests: XCTestCase {
     private func frame(sequence: Int64 = 1, contacts: [Contact]? = nil) -> ContactFrame {
@@ -21,57 +21,20 @@ final class FrameValidatorTests: XCTestCase {
         XCTAssertFailure(FrameValidator.validate(frame(sequence: 4), previousSequence: 4), .invalidSequence)
         XCTAssertFailure(FrameValidator.validate(frame(contacts: [Contact(deviceID: 1, pathIndex: 1, fingerID: 1, x: 0, y: 0, timestamp: 11, phase: .moved)]), previousSequence: nil), .inconsistentTimestamp)
     }
-    func testInvalidFrameDisablesBeforeOutput() {
-        let session = DiagnosticSession(); session.startIfReady(true)
-        var outputs = 0
-        session.accept(frame(contacts: [])) { _ in outputs += 1 }
-        XCTAssertEqual(outputs, 0)
-        XCTAssertEqual(session.state, .disabled("frame validation: empty"))
-    }
-    func testUnavailableBackendStartsDisabled() {
-        let session = DiagnosticSession(); session.startIfReady(false)
-        XCTAssertEqual(session.state, .disabled("backend unavailable"))
-    }
-    func testStoppedSessionRejectsQueuedFramesWithoutOutput() {
-        let session = DiagnosticSession(); session.startIfReady(true); session.stop()
-        var outputs = 0
-        XCTAssertEqual(session.accept(frame()) { _ in outputs += 1 }, .ignored)
-        XCTAssertEqual(outputs, 0)
-        XCTAssertEqual(session.state, .idle)
+    func testRejectsEmptyFramesAndContactOverflow() {
+        XCTAssertFailure(FrameValidator.validate(frame(contacts: []), previousSequence: nil), .empty)
+        let contact = Contact(deviceID: 1, pathIndex: 1, fingerID: 1, x: 0.5, y: 0.5, timestamp: 10, phase: .moved)
+        XCTAssertFailure(FrameValidator.validate(frame(contacts: Array(repeating: contact, count: 17)), previousSequence: nil), .tooManyContacts)
     }
 
-    func testValidFramePreventsNoFrameTimeoutAndAllowsAnotherTerminalOutcome() {
-        let lifecycle = DiagnosticLifecycle()
-        XCTAssertTrue(lifecycle.recordValidFrame())
-        XCTAssertFalse(lifecycle.completeNoFrameTimeout())
-        XCTAssertTrue(lifecycle.complete(.stopped))
-        XCTAssertEqual(lifecycle.outcome, .stopped)
-    }
-
-    func testNoFrameTimeoutClaimsDisabledTerminalOutcome() {
-        let lifecycle = DiagnosticLifecycle()
-        XCTAssertTrue(lifecycle.completeNoFrameTimeout())
-        XCTAssertEqual(lifecycle.outcome, .disabled)
-        XCTAssertFalse(lifecycle.complete(.stopped))
-    }
-
-    func testOnlyOneCompetingTerminalPathWins() {
-        let lifecycle = DiagnosticLifecycle()
-        let completions = DispatchGroup()
-        let results = DispatchQueue(label: "results")
-        var wins = 0
-
-        for outcome in [DiagnosticTerminalOutcome.stopped, .disabled] {
-            completions.enter()
-            DispatchQueue.global().async {
-                if lifecycle.complete(outcome) { results.sync { wins += 1 } }
-                completions.leave()
-            }
-        }
-
-        XCTAssertEqual(completions.wait(timeout: .now() + 1), .success)
-        XCTAssertEqual(wins, 1)
-        XCTAssertNotNil(lifecycle.outcome)
+    func testRejectsInvalidTimestampsAndIdentity() {
+        XCTAssertFailure(FrameValidator.validate(
+            ContactFrame(contacts: [Contact(deviceID: 1, pathIndex: 1, fingerID: 1, x: 0.5, y: 0.5, timestamp: 0, phase: .moved)], timestamp: 0, sequence: 1),
+            previousSequence: nil
+        ), .invalidTimestamp)
+        XCTAssertFailure(FrameValidator.validate(frame(contacts: [
+            Contact(deviceID: 0, pathIndex: 1, fingerID: 1, x: 0.5, y: 0.5, timestamp: 10, phase: .moved)
+        ]), previousSequence: nil), .invalidIdentity)
     }
 
     private func XCTAssertSuccess(_ result: Result<Void, FrameValidationError>, file: StaticString = #filePath, line: UInt = #line) {

@@ -1,4 +1,4 @@
-#include "EdgeMotionDiagnosticBridge.h"
+#include "EdgeMotionInputBridge.h"
 #include <CoreFoundation/CoreFoundation.h>
 #include <dlfcn.h>
 #include <math.h>

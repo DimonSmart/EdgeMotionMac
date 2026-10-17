@@ -1,8 +1,8 @@
 import AppKit
 import CoreGraphics
 import EdgeMotionCore
-import EdgeMotionDiagnosticBridge
-import EdgeMotionDiagnosticCore
+import EdgeMotionInputBridge
+import EdgeMotionInputCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private enum StatusAppearance: Equatable { case disabled, enabled, active }
