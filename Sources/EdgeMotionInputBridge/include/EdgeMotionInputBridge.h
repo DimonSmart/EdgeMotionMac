@@ -46,6 +46,9 @@ EMBridgeState EMBridgePrepare(void);
 bool EMBridgeStartBuiltIn(EMFrameCallback callback, void *context);
 void EMBridgeStop(void);
 EMBridgeState EMBridgeCurrentState(void);
+/// The status returned by the most recent MTDeviceStart/MTDeviceStop failure.
+/// Zero means that no device-operation failure has been recorded.
+int32_t EMBridgeLastOSStatus(void);
 const char *EMBridgeFailureReason(void);
 
 #endif

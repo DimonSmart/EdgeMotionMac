@@ -124,6 +124,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let frame else {
             engine.stop()
             lastCursorSample = nil
+            if EMBridgeCurrentState() == EMBridgeDisabled {
+                disable()
+                showBridgeError()
+                return
+            }
             updateStatusAppearance()
             return
         }
@@ -198,7 +203,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showBridgeError() {
-        let alert = NSAlert(); alert.messageText = "EdgeMotion stayed disabled"; alert.informativeText = String(cString: EMBridgeFailureReason()); alert.runModal()
+        let status = EMBridgeLastOSStatus()
+        let detail = String(cString: EMBridgeFailureReason())
+        let statusDetail = status == 0 ? "" : " (OSStatus \(status))"
+        let alert = NSAlert(); alert.messageText = "EdgeMotion stayed disabled"; alert.informativeText = detail + statusDetail; alert.runModal()
     }
     @MainActor @objc private func showAbout() {
         if aboutController == nil {
@@ -236,8 +244,6 @@ struct EdgeMotionMain {
     }
 }
 
-EdgeMotionMain.main()
-
 private let multitouchCallback: @convention(c) (EMDecodedFrame, UnsafeMutableRawPointer?) -> Void = { raw, context in
     // Copy before returning from the private callback, then process on the app
     // thread. No UI or Quartz calls occur on the framework callback thread.
@@ -248,3 +254,5 @@ private let multitouchCallback: @convention(c) (EMDecodedFrame, UnsafeMutableRaw
         delegate.accept(copied)
     }
 }
+
+EdgeMotionMain.main()

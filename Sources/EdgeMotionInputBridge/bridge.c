@@ -51,22 +51,37 @@ static MTDeviceStopFn stopDevice;
 static EMFrameCallback frameCallback;
 static void *callbackContext;
 static _Atomic int32_t bridgeState = EMBridgeUnavailable;
+// EMFailureNotPrepared is the first nonzero failure code below.
+static _Atomic int32_t failureCode = 1;
+static _Atomic int32_t lastOSStatus;
 // Startup and shutdown can be requested by the menu-bar action and the global
 // shortcut independently. Keep the transition from Ready to Running atomic so
 // a second request cannot reinterpret the first as a missing callback.
 static pthread_mutex_t lifecycleLock = PTHREAD_MUTEX_INITIALIZER;
-static char failureReason[160] = "not prepared";
+static bool callbackRegistered;
+static bool deviceStarted;
 
-static void setFailure(const char *reason) {
-    size_t length = strlen(reason);
-    if (length >= sizeof(failureReason)) length = sizeof(failureReason) - 1;
-    memcpy(failureReason, reason, length);
-    failureReason[length] = '\0';
+typedef enum : int32_t {
+    EMFailureNone = 0,
+    EMFailureNotPrepared,
+    EMFailureFrameworkUnavailable,
+    EMFailureRequiredSymbolUnavailable,
+    EMFailureCallbackUnavailable,
+    EMFailureDeviceEnumeration,
+    EMFailureNoBuiltInDevice,
+    EMFailureInvalidFrame,
+    EMFailureInvalidContact,
+    EMFailureDeviceStart,
+    EMFailureDeviceStop,
+} EMFailureCode;
+
+static void setFailure(EMFailureCode code) {
+    atomic_store_explicit(&failureCode, code, memory_order_release);
 }
 
-static void setStartFailure(OSStatus status) {
-    (void)status;
-    setFailure("MTDeviceStart failed");
+static void setDeviceFailure(EMFailureCode code, OSStatus status) {
+    atomic_store_explicit(&lastOSStatus, status, memory_order_release);
+    setFailure(code);
 }
 
 static bool finiteUnit(float value) {
@@ -85,6 +100,22 @@ static float readF32(const MTTouchAssumption *touch, size_t offset) {
     return value;
 }
 
+static void notifyInputFailure(void) {
+    EMFrameCallback callback = frameCallback;
+    if (callback) {
+        callback((EMDecodedFrame){ .contacts = NULL, .contactCount = 0, .timestamp = 0, .sequence = 0 }, callbackContext);
+    }
+}
+
+static void disableFromCallback(EMFailureCode failure) {
+    int32_t expected = EMBridgeRunning;
+    if (atomic_compare_exchange_strong_explicit(&bridgeState, &expected, EMBridgeDisabled,
+                                                memory_order_acq_rel, memory_order_acquire)) {
+        setFailure(failure);
+        notifyInputFailure();
+    }
+}
+
 // The framework may invoke this on its own thread. It only copies one bounded
 // frame and returns zero, which preserves normal system gesture handling.
 static int32_t receiveContacts(MTDeviceRef device, const MTTouchAssumption *touches,
@@ -95,8 +126,7 @@ static int32_t receiveContacts(MTDeviceRef device, const MTTouchAssumption *touc
     }
     if (count < 0 || count > 16 || !isfinite(timestamp) || timestamp <= 0 || frame < 0 ||
         (count > 0 && !touches)) {
-        setFailure("invalid callback frame");
-        atomic_store_explicit(&bridgeState, EMBridgeDisabled, memory_order_release);
+        disableFromCallback(EMFailureInvalidFrame);
         return 0;
     }
 
@@ -109,8 +139,7 @@ static int32_t receiveContacts(MTDeviceRef device, const MTTouchAssumption *touc
         float x = readF32(touch, kTouchNormalizedXOffset);
         float y = readF32(touch, kTouchNormalizedYOffset);
         if (pathIndex < 0 || fingerID < 0 || !finiteUnit(x) || !finiteUnit(y)) {
-            setFailure("invalid contact layout or values");
-            atomic_store_explicit(&bridgeState, EMBridgeDisabled, memory_order_release);
+            disableFromCallback(EMFailureInvalidContact);
             return 0;
         }
         EMContactPhase phase = (state == 5 || state == 7) ? EMContactEnded : EMContactMoved;
@@ -135,13 +164,13 @@ static int32_t receiveContacts(MTDeviceRef device, const MTTouchAssumption *touc
     return 0;
 }
 
-EMBridgeState EMBridgePrepare(void) {
+static EMBridgeState prepareLocked(void) {
     EMBridgeState state = atomic_load_explicit(&bridgeState, memory_order_acquire);
     if (state == EMBridgeDisabled || state == EMBridgeReady || state == EMBridgeRunning) return state;
 
     framework = dlopen("/System/Library/PrivateFrameworks/MultitouchSupport.framework/MultitouchSupport", RTLD_LAZY | RTLD_LOCAL);
     if (!framework) {
-        setFailure("MultitouchSupport unavailable");
+        setFailure(EMFailureFrameworkUnavailable);
         atomic_store_explicit(&bridgeState, EMBridgeDisabled, memory_order_release);
         return EMBridgeDisabled;
     }
@@ -151,24 +180,35 @@ EMBridgeState EMBridgePrepare(void) {
     startDevice = (MTDeviceStartFn)dlsym(framework, "MTDeviceStart");
     stopDevice = (MTDeviceStopFn)dlsym(framework, "MTDeviceStop");
     if (!createList || !isBuiltIn || !registerCallback || !startDevice || !stopDevice) {
-        setFailure("required MultitouchSupport symbol unavailable");
+        setFailure(EMFailureRequiredSymbolUnavailable);
         atomic_store_explicit(&bridgeState, EMBridgeDisabled, memory_order_release);
         return EMBridgeDisabled;
     }
-    failureReason[0] = '\0';
+    setFailure(EMFailureNone);
+    atomic_store_explicit(&lastOSStatus, 0, memory_order_release);
     atomic_store_explicit(&bridgeState, EMBridgeReady, memory_order_release);
     return EMBridgeReady;
 }
 
+EMBridgeState EMBridgePrepare(void) {
+    pthread_mutex_lock(&lifecycleLock);
+    EMBridgeState state = prepareLocked();
+    pthread_mutex_unlock(&lifecycleLock);
+    return state;
+}
+
 bool EMBridgeStartBuiltIn(EMFrameCallback callback, void *context) {
+    pthread_mutex_lock(&lifecycleLock);
     if (!callback) {
-        setFailure("callback unavailable");
-        atomic_store_explicit(&bridgeState, EMBridgeDisabled, memory_order_release);
+        setFailure(EMFailureCallbackUnavailable);
+        if (atomic_load_explicit(&bridgeState, memory_order_acquire) != EMBridgeRunning) {
+            atomic_store_explicit(&bridgeState, EMBridgeDisabled, memory_order_release);
+        }
+        pthread_mutex_unlock(&lifecycleLock);
         return false;
     }
 
-    pthread_mutex_lock(&lifecycleLock);
-    EMBridgeState state = EMBridgePrepare();
+    EMBridgeState state = prepareLocked();
     // Starting an already-running session is harmless. This check must be
     // inside the lifecycle transition: another action can begin the session
     // after an earlier non-atomic state check.
@@ -183,7 +223,7 @@ bool EMBridgeStartBuiltIn(EMFrameCallback callback, void *context) {
     if (!activeDeviceList) {
         activeDeviceList = createList();
         if (!activeDeviceList) {
-            setFailure("device enumeration failed");
+            setFailure(EMFailureDeviceEnumeration);
             atomic_store_explicit(&bridgeState, EMBridgeDisabled, memory_order_release);
             pthread_mutex_unlock(&lifecycleLock);
             return false;
@@ -195,21 +235,39 @@ bool EMBridgeStartBuiltIn(EMFrameCallback callback, void *context) {
         }
     }
     if (!activeDevice) {
-        setFailure("no compatible built-in trackpad");
+        setFailure(EMFailureNoBuiltInDevice);
         atomic_store_explicit(&bridgeState, EMBridgeDisabled, memory_order_release);
         pthread_mutex_unlock(&lifecycleLock);
         return false;
     }
-    frameCallback = callback;
-    callbackContext = context;
-    registerCallback(activeDevice, receiveContacts);
+    if (!callbackRegistered) {
+        frameCallback = callback;
+        callbackContext = context;
+        registerCallback(activeDevice, receiveContacts);
+        callbackRegistered = true;
+    }
     // Some framework versions may synchronously deliver the first frame as
     // start returns, so make the callback eligible before invoking start.
     atomic_store_explicit(&bridgeState, EMBridgeRunning, memory_order_release);
+    deviceStarted = true;
     OSStatus status = startDevice(activeDevice, 0);
     if (status != 0) {
-        setStartFailure(status);
+        setDeviceFailure(EMFailureDeviceStart, status);
+        // A nonzero result does not document whether the private framework
+        // started partially. Leave the bridge disabled and make one bounded
+        // cleanup attempt instead of claiming that it is ready to restart.
+        (void)stopDevice(activeDevice);
+        deviceStarted = false;
         atomic_store_explicit(&bridgeState, EMBridgeDisabled, memory_order_release);
+        pthread_mutex_unlock(&lifecycleLock);
+        return false;
+    }
+    // A private framework can synchronously invoke receiveContacts from
+    // MTDeviceStart. If that callback rejected its first frame, it owns the
+    // transition to Disabled; do not report a successful start to Swift.
+    if (atomic_load_explicit(&bridgeState, memory_order_acquire) != EMBridgeRunning) {
+        (void)stopDevice(activeDevice);
+        deviceStarted = false;
         pthread_mutex_unlock(&lifecycleLock);
         return false;
     }
@@ -219,8 +277,29 @@ bool EMBridgeStartBuiltIn(EMFrameCallback callback, void *context) {
 
 void EMBridgeStop(void) {
     pthread_mutex_lock(&lifecycleLock);
-    if (atomic_exchange_explicit(&bridgeState, EMBridgeReady, memory_order_acq_rel) == EMBridgeRunning && stopDevice && activeDevice) {
-        (void)stopDevice(activeDevice);
+    EMBridgeState state = (EMBridgeState)atomic_load_explicit(&bridgeState, memory_order_acquire);
+    // Prevent a late callback from starting a failure transition while the
+    // private framework is being stopped. A concurrent Start waits on this
+    // lock, so it cannot mistake this transient Ready state for a completed
+    // stop.
+    if (state == EMBridgeRunning) {
+        atomic_store_explicit(&bridgeState, EMBridgeReady, memory_order_release);
+    }
+    if (deviceStarted && stopDevice && activeDevice) {
+        OSStatus status = stopDevice(activeDevice);
+        if (status != 0) {
+            setDeviceFailure(EMFailureDeviceStop, status);
+            atomic_store_explicit(&bridgeState, EMBridgeDisabled, memory_order_release);
+            pthread_mutex_unlock(&lifecycleLock);
+            return;
+        }
+        deviceStarted = false;
+    }
+    // Disabled is a sticky failure state. It can only become Ready through a
+    // future explicit recovery implementation, never merely because Stop was
+    // called. Unavailable is likewise not a recoverable prepared bridge.
+    if (state == EMBridgeRunning || state == EMBridgeReady) {
+        atomic_store_explicit(&bridgeState, EMBridgeReady, memory_order_release);
     }
     // Private callback unregister/reconnect is intentionally not inferred from
     // the reverse-engineered ABI. The retained framework/list/context remain
@@ -233,4 +312,23 @@ EMBridgeState EMBridgeCurrentState(void) {
     return (EMBridgeState)atomic_load_explicit(&bridgeState, memory_order_acquire);
 }
 
-const char *EMBridgeFailureReason(void) { return failureReason; }
+int32_t EMBridgeLastOSStatus(void) {
+    return atomic_load_explicit(&lastOSStatus, memory_order_acquire);
+}
+
+const char *EMBridgeFailureReason(void) {
+    switch ((EMFailureCode)atomic_load_explicit(&failureCode, memory_order_acquire)) {
+    case EMFailureNone: return "";
+    case EMFailureNotPrepared: return "not prepared";
+    case EMFailureFrameworkUnavailable: return "MultitouchSupport unavailable";
+    case EMFailureRequiredSymbolUnavailable: return "required MultitouchSupport symbol unavailable";
+    case EMFailureCallbackUnavailable: return "callback unavailable";
+    case EMFailureDeviceEnumeration: return "device enumeration failed";
+    case EMFailureNoBuiltInDevice: return "no compatible built-in trackpad";
+    case EMFailureInvalidFrame: return "invalid callback frame";
+    case EMFailureInvalidContact: return "invalid contact layout or values";
+    case EMFailureDeviceStart: return "MTDeviceStart failed";
+    case EMFailureDeviceStop: return "MTDeviceStop failed";
+    }
+    return "unknown bridge failure";
+}
