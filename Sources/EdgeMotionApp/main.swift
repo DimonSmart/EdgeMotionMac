@@ -99,7 +99,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let alert = NSAlert(); alert.messageText = "Accessibility permission is required"; alert.informativeText = "Allow EdgeMotion in System Settings before enabling cursor motion."; alert.runModal()
             return
         }
-        guard EMBridgePrepare() == EMBridgeReady else { showBridgeError(); return }
         guard EMBridgeStartBuiltIn(multitouchCallback, Unmanaged.passUnretained(self).toOpaque()) else { showBridgeError(); return }
         enabled = true
         toggleItem.title = "Disable EdgeMotion"

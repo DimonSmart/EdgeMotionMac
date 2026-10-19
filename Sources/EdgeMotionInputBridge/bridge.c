@@ -2,6 +2,7 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <dlfcn.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -50,6 +51,10 @@ static MTDeviceStopFn stopDevice;
 static EMFrameCallback frameCallback;
 static void *callbackContext;
 static _Atomic int32_t bridgeState = EMBridgeUnavailable;
+// Startup and shutdown can be requested by the menu-bar action and the global
+// shortcut independently. Keep the transition from Ready to Running atomic so
+// a second request cannot reinterpret the first as a missing callback.
+static pthread_mutex_t lifecycleLock = PTHREAD_MUTEX_INITIALIZER;
 static char failureReason[160] = "not prepared";
 
 static void setFailure(const char *reason) {
@@ -156,11 +161,23 @@ EMBridgeState EMBridgePrepare(void) {
 }
 
 bool EMBridgeStartBuiltIn(EMFrameCallback callback, void *context) {
-    if (EMBridgePrepare() != EMBridgeReady || !callback) {
-        if (EMBridgeCurrentState() != EMBridgeDisabled) {
-            setFailure("callback unavailable");
-            atomic_store_explicit(&bridgeState, EMBridgeDisabled, memory_order_release);
-        }
+    if (!callback) {
+        setFailure("callback unavailable");
+        atomic_store_explicit(&bridgeState, EMBridgeDisabled, memory_order_release);
+        return false;
+    }
+
+    pthread_mutex_lock(&lifecycleLock);
+    EMBridgeState state = EMBridgePrepare();
+    // Starting an already-running session is harmless. This check must be
+    // inside the lifecycle transition: another action can begin the session
+    // after an earlier non-atomic state check.
+    if (state == EMBridgeRunning) {
+        pthread_mutex_unlock(&lifecycleLock);
+        return true;
+    }
+    if (state != EMBridgeReady) {
+        pthread_mutex_unlock(&lifecycleLock);
         return false;
     }
     if (!activeDeviceList) {
@@ -168,6 +185,7 @@ bool EMBridgeStartBuiltIn(EMFrameCallback callback, void *context) {
         if (!activeDeviceList) {
             setFailure("device enumeration failed");
             atomic_store_explicit(&bridgeState, EMBridgeDisabled, memory_order_release);
+            pthread_mutex_unlock(&lifecycleLock);
             return false;
         }
         CFIndex deviceCount = CFArrayGetCount(activeDeviceList);
@@ -179,6 +197,7 @@ bool EMBridgeStartBuiltIn(EMFrameCallback callback, void *context) {
     if (!activeDevice) {
         setFailure("no compatible built-in trackpad");
         atomic_store_explicit(&bridgeState, EMBridgeDisabled, memory_order_release);
+        pthread_mutex_unlock(&lifecycleLock);
         return false;
     }
     frameCallback = callback;
@@ -191,12 +210,15 @@ bool EMBridgeStartBuiltIn(EMFrameCallback callback, void *context) {
     if (status != 0) {
         setStartFailure(status);
         atomic_store_explicit(&bridgeState, EMBridgeDisabled, memory_order_release);
+        pthread_mutex_unlock(&lifecycleLock);
         return false;
     }
+    pthread_mutex_unlock(&lifecycleLock);
     return true;
 }
 
 void EMBridgeStop(void) {
+    pthread_mutex_lock(&lifecycleLock);
     if (atomic_exchange_explicit(&bridgeState, EMBridgeReady, memory_order_acq_rel) == EMBridgeRunning && stopDevice && activeDevice) {
         (void)stopDevice(activeDevice);
     }
@@ -204,6 +226,7 @@ void EMBridgeStop(void) {
     // the reverse-engineered ABI. The retained framework/list/context remain
     // valid for this process-lifetime session; qualified reconnect support is
     // a separate hardware task.
+    pthread_mutex_unlock(&lifecycleLock);
 }
 
 EMBridgeState EMBridgeCurrentState(void) {
