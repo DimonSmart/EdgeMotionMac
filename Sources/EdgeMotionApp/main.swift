@@ -4,8 +4,8 @@ import EdgeMotionCore
 import EdgeMotionInputBridge
 import EdgeMotionInputCore
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
-    private enum StatusAppearance: Equatable { case disabled, enabled, active }
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    private enum StatusAppearance: Equatable { case disabled, permissionRequired, enabled, active }
     private enum AppInfo {
         static var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development" }
         static let repositoryURL = URL(string: "https://github.com/DimonSmart/EdgeMotionMac")!
@@ -15,6 +15,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var statusMenu: NSMenu!
     private var toggleItem: NSMenuItem!
+    private var accessibilityStatusItem: NSMenuItem!
+    private var requestAccessibilityItem: NSMenuItem!
     private var globalKeyMonitor: Any?
     private var localKeyMonitor: Any?
     private var timer: Timer?
@@ -34,6 +36,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         toggleItem.target = self
         toggleItem.keyEquivalentModifierMask = [.option, .command]
         menu.addItem(.separator())
+        accessibilityStatusItem = menu.addItem(withTitle: "Accessibility: Checking…", action: nil, keyEquivalent: "")
+        accessibilityStatusItem.isEnabled = false
+        requestAccessibilityItem = menu.addItem(withTitle: "Request Accessibility Permission…", action: #selector(requestAccessibilityPermission), keyEquivalent: "")
+        requestAccessibilityItem.target = self
+        let settingsItem = menu.addItem(withTitle: "Open Accessibility Settings…", action: #selector(openAccessibilitySettings), keyEquivalent: "")
+        settingsItem.target = self
+        menu.addItem(.separator())
         let aboutItem = menu.addItem(withTitle: "About EdgeMotion " + AppInfo.version, action: #selector(showAbout), keyEquivalent: "")
         aboutItem.target = self
         let repositoryItem = menu.addItem(withTitle: "Open Repository", action: #selector(openRepository), keyEquivalent: "")
@@ -42,11 +51,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let quitItem = menu.addItem(withTitle: "Quit EdgeMotion", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         statusMenu = menu
+        menu.delegate = self
         statusItem.button?.target = self
         statusItem.button?.action = #selector(handleStatusItemClick(_:))
         statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         installToggleShortcut()
         updateStatusAppearance()
+        updateAccessibilityMenu()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(refreshPermissionsOnActivation(_:)),
+            name: NSApplication.didBecomeActiveNotification,
+            object: nil
+        )
         NSApp.setActivationPolicy(.accessory)
     }
 
@@ -96,7 +113,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func enable() {
         guard QuartzOutput.isAccessibilityTrusted else {
-            let alert = NSAlert(); alert.messageText = "Accessibility permission is required"; alert.informativeText = "Allow EdgeMotion in System Settings before enabling cursor motion."; alert.runModal()
+            _ = QuartzOutput.requestAccessibilityAccess()
+            updateAccessibilityMenu()
+            updateStatusAppearance()
             return
         }
         guard EMBridgeStartBuiltIn(multitouchCallback, Unmanaged.passUnretained(self).toOpaque()) else { showBridgeError(); return }
@@ -169,7 +188,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func moveCursor() {
-        guard enabled, EMBridgeCurrentState() == EMBridgeRunning,
+        guard enabled else { return }
+        guard QuartzOutput.isAccessibilityTrusted else {
+            disable()
+            updateAccessibilityMenu()
+            return
+        }
+        guard EMBridgeCurrentState() == EMBridgeRunning,
               let inputClockOffset else { return }
         let delta = engine.tick(at: ProcessInfo.processInfo.systemUptime - inputClockOffset)
         updateStatusAppearance()
@@ -179,7 +204,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateStatusAppearance() {
-        let appearance: StatusAppearance = enabled ? (engine.state == .active ? .active : .enabled) : .disabled
+        let appearance: StatusAppearance = enabled
+            ? (engine.state == .active ? .active : .enabled)
+            : (QuartzOutput.isAccessibilityTrusted ? .disabled : .permissionRequired)
         guard appearance != displayedAppearance else { return }
         displayedAppearance = appearance
         let symbolName: String
@@ -188,6 +215,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .disabled:
             symbolName = "arrow.up.right.circle"
             toolTip = "EdgeMotion — disabled"
+        case .permissionRequired:
+            symbolName = "exclamationmark.triangle"
+            toolTip = "EdgeMotion — Accessibility permission required"
         case .enabled:
             symbolName = "arrow.up.right.circle.fill"
             toolTip = "EdgeMotion — enabled"
@@ -200,6 +230,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.image = image
         statusItem.button?.contentTintColor = nil
         statusItem.button?.toolTip = toolTip
+    }
+
+    private func updateAccessibilityMenu() {
+        let trusted = QuartzOutput.isAccessibilityTrusted
+        accessibilityStatusItem.title = trusted ? "Accessibility: Allowed" : "Accessibility: Permission required"
+        requestAccessibilityItem.isEnabled = !trusted
+    }
+
+    @objc private func requestAccessibilityPermission() {
+        guard !QuartzOutput.isAccessibilityTrusted else { return }
+        _ = QuartzOutput.requestAccessibilityAccess()
+        updateAccessibilityMenu()
+        updateStatusAppearance()
+    }
+
+    @objc private func openAccessibilitySettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    @objc private func refreshPermissionsOnActivation(_ notification: Notification) {
+        if enabled && !QuartzOutput.isAccessibilityTrusted {
+            disable()
+        }
+        updateAccessibilityMenu()
+        updateStatusAppearance()
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        if enabled && !QuartzOutput.isAccessibilityTrusted {
+            disable()
+        }
+        updateAccessibilityMenu()
+        updateStatusAppearance()
     }
 
     private func showBridgeError() {

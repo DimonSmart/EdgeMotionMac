@@ -38,13 +38,15 @@ swift test --configuration release
 swift run EdgeMotion
 ```
 
-Build an unsigned universal app bundle for inspection:
+Configure one persistent local Debug signing identity on this Mac, then build a signed universal developer app:
 
 ```bash
-bash scripts/package-macos-app.sh 0.1.0 /tmp/edgemotion-package
+bash scripts/setup-dev-signing.sh # once per Mac
+bash scripts/package-macos-app.sh --development 0.1.0 /tmp/edgemotion-package
+open /tmp/edgemotion-package/EdgeMotion.app
 ```
 
-Running directly from Terminal and running EdgeMotion.app use different Accessibility permission identities.
+The setup reuses a valid Apple Development identity when available; otherwise it creates one local self-signed code-signing identity and stores its non-extractable private key in the user Keychain. It does not add that certificate to system trust. Rebuilt developer apps keep the same bundle ID and signing identity, so Accessibility approval remains associated with the app across builds. Running directly from Terminal still uses a different permission identity. The ordinary packaging command without `--development` remains unsigned for CI and public releases.
 
 ## Release process
 
@@ -66,7 +68,7 @@ Open the EdgeMotion menu-bar menu (right-click its icon) and choose **About Edge
 The About window checks the latest stable GitHub Release when opened.
 For a standard Homebrew-managed /Applications/EdgeMotion.app installation, a newer release offers **Update now**. EdgeMotion runs a targeted Homebrew Cask update, verifies the installed app, removes quarantine from that unsigned app only, and restarts. Manual ZIP installations and developer builds can open the release page instead; they are never silently replaced.
 
-An offline GitHub check or an unavailable Homebrew package does not stop cursor operation. The updater does not require an Apple Developer certificate. Because EdgeMotion is unsigned, you may need to re-enable **Accessibility** after a version change.
+An offline GitHub check or an unavailable Homebrew package does not stop cursor operation. The updater does not require an Apple Developer certificate. Public releases remain unsigned and may require Accessibility approval again when their code identity changes; local developer builds use the persistent signing identity described above.
 
 ## Limitations and privacy
 

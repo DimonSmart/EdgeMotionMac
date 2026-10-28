@@ -8,6 +8,14 @@ import ApplicationServices
 public enum QuartzOutput {
     public static var isAccessibilityTrusted: Bool { AXIsProcessTrusted() }
 
+    /// Requests Accessibility access after an explicit user action. The return
+    /// value is the current trust state; any system prompt is asynchronous.
+    @discardableResult public static func requestAccessibilityAccess() -> Bool {
+        AXIsProcessTrustedWithOptions([
+            kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true
+        ] as CFDictionary)
+    }
+
     static func mouseEventType(isLeftButtonPressed: Bool) -> CGEventType {
         isLeftButtonPressed ? .leftMouseDragged : .mouseMoved
     }

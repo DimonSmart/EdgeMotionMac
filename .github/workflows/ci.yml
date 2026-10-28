@@ -19,7 +19,7 @@ jobs:
       - name: Test Swift package
         run: swift test --configuration release
       - name: Check packaging scripts
-        run: bash -n scripts/package-macos-app.sh scripts/render-homebrew-cask.sh docs/install-macos.sh
+        run: bash -n scripts/setup-dev-signing.sh scripts/package-macos-app.sh scripts/render-homebrew-cask.sh docs/install-macos.sh
       - name: Parse PowerShell release script
         shell: pwsh
         run: |

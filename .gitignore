@@ -22,6 +22,8 @@ mono_crash.*
 # Build results
 [Bb]uild/
 .build/
+/LocalSigning.xcconfig
+/.LocalSigning.xcconfig.*
 .idd/factory/
 [Dd]ebug/
 [Dd]ebugPublic/
