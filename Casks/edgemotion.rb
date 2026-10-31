@@ -1,6 +1,6 @@
 cask "edgemotion" do
-  version "0.1.0"
-  sha256 "c9125fd373e64fe281f768a86189d67e71e1ea5a2a8846811413ba5ad0c91e7d"
+  version "0.1.1"
+  sha256 "f78a63c4fdec15aba1ceac1c232c08eaec74b2a26d92a0f791adb9cd3566f7da"
 
   url "https://github.com/DimonSmart/EdgeMotionMac/releases/download/v#{version}/EdgeMotion-v#{version}-macos-universal.zip"
   name "EdgeMotion"
